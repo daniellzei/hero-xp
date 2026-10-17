@@ -1,1 +1,269 @@
+name: Gerar APK Hero XP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Baixar arquivos do projeto
+        uses: actions/checkout@v4
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Android
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar componentes Android
+        run: sdkmanager "platforms;android-35" "build-tools;34.0.0"
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Criar projeto Android
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/com/heroxp/app
+          mkdir -p app/src/main/assets
+          cp index.html app/src/main/assets/index.html
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "HeroXP"
+          include(":app")
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.heroxp.app'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.heroxp.app'
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:label="Hero XP"
+                  android:allowBackup="false"
+                  android:usesCleartextTraffic="false"
+                  android:theme="@android:style/Theme.Material.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/heroxp/app/MainActivity.java <<'EOF'
+          package com.heroxp.app;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.TextView;
+
+          import java.io.ByteArrayOutputStream;
+          import java.io.InputStream;
+          import java.nio.charset.StandardCharsets;
+
+          public class MainActivity extends Activity {
+              private WebView webView;
+              private ValueCallback<Uri[]> fileCallback;
+              private static final int PICK_IMAGE = 41;
+
+              @Override
+              @SuppressWarnings("deprecation")
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  getWindow().setStatusBarColor(Color.rgb(11, 13, 16));
+                  getWindow().setNavigationBarColor(Color.rgb(17, 22, 29));
+
+                  webView = new WebView(this);
+                  webView.setBackgroundColor(Color.rgb(11, 13, 16));
+                  setContentView(webView);
+
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setAllowFileAccess(false);
+                  settings.setAllowContentAccess(true);
+                  settings.setAllowFileAccessFromFileURLs(false);
+                  settings.setAllowUniversalAccessFromFileURLs(false);
+                  settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+                  settings.setSupportMultipleWindows(false);
+
+                  webView.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean shouldOverrideUrlLoading(
+                              WebView view, WebResourceRequest request) {
+                          return true;
+                      }
+
+                      @Override
+                      public boolean shouldOverrideUrlLoading(
+                              WebView view, String url) {
+                          return true;
+                      }
+                  });
+
+                  webView.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public boolean onShowFileChooser(
+                              WebView view,
+                              ValueCallback<Uri[]> callback,
+                              FileChooserParams params) {
+
+                          if (fileCallback != null) {
+                              fileCallback.onReceiveValue(null);
+                          }
+
+                          fileCallback = callback;
+
+                          Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                          intent.addCategory(Intent.CATEGORY_OPENABLE);
+                          intent.setType("image/*");
+
+                          try {
+                              startActivityForResult(
+                                  Intent.createChooser(intent, "Escolha sua foto"),
+                                  PICK_IMAGE
+                              );
+                          } catch (Exception error) {
+                              fileCallback.onReceiveValue(null);
+                              fileCallback = null;
+                          }
+                          return true;
+                      }
+                  });
+
+                  try (InputStream input = getAssets().open("index.html");
+                       ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                      byte[] buffer = new byte[8192];
+                      int count;
+                      while ((count = input.read(buffer)) != -1) {
+                          output.write(buffer, 0, count);
+                      }
+
+                      String html = new String(
+                          output.toByteArray(), StandardCharsets.UTF_8
+                      );
+
+                      String origin = "https://hero-xp.invalid/";
+                      webView.loadDataWithBaseURL(
+                          origin, html, "text/html", null, origin
+                      );
+                  } catch (Exception error) {
+                      TextView message = new TextView(this);
+                      message.setText("Não foi possível abrir o Hero XP.");
+                      message.setTextColor(Color.WHITE);
+                      message.setPadding(32, 60, 32, 32);
+                      setContentView(message);
+                  }
+              }
+
+              @Override
+              protected void onActivityResult(
+                      int requestCode, int resultCode, Intent data) {
+                  super.onActivityResult(requestCode, resultCode, data);
+
+                  if (requestCode != PICK_IMAGE || fileCallback == null) return;
+
+                  Uri[] result = null;
+                  if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                      result = new Uri[] { data.getData() };
+                  }
+
+                  fileCallback.onReceiveValue(result);
+                  fileCallback = null;
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (fileCallback != null) {
+                      fileCallback.onReceiveValue(null);
+                      fileCallback = null;
+                  }
+                  if (webView != null) webView.destroy();
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - name: Compilar APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Disponibilizar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hero-XP-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+          if-no-files-found: error
 
